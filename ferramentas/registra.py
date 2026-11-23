@@ -14,7 +14,7 @@ from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
-GIST_ID = ""
+GIST_ID = "d9c124b83a2d1fdc7dd5cd8b709f35f2"
 CONTA = "VoidSeeder"
 ARQUIVO_GIST = "registros.json"
 TEMPO_LIMITE = 30
