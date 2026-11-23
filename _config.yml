@@ -1,0 +1,3 @@
+exclude:
+  - ferramentas
+  - README.md
