@@ -133,13 +133,20 @@ def _commit_publicavel(repo, sha, termos):
 def aplicar(registros, operacoes, repo, termos):
     _valida(registros)
     por_id = {r["id"]: r for r in registros}
+    # Só uma reescrita de algo já publicado ou na fila publica o novo SHA. Assim, um item
+    # apagado à mão do feed não volta quando o histórico é reescrito.
+    conhecidos = set(por_id)
     for operacao in operacoes:
         tipo = operacao.get("op")
         if tipo == "commit":
+            conhecidos.add(operacao["sha"])
             novo = _commit_publicavel(repo, operacao["sha"], termos)
         elif tipo == "reescrita":
             por_id.pop(operacao["de"], None)
-            novo = _commit_publicavel(repo, operacao["para"], termos)
+            novo = None
+            if operacao["de"] in conhecidos:
+                conhecidos.add(operacao["para"])
+                novo = _commit_publicavel(repo, operacao["para"], termos)
         elif tipo == "nota":
             novo = operacao["registro"]
             termo = termo_bloqueado(novo["texto"], termos)

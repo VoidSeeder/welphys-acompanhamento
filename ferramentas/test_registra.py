@@ -219,6 +219,7 @@ class TestEnviar(BaseEnvio):
     def test_commit_atrasado_depois_do_amend_nao_volta(self):
         velho = self.commit("Antigo")
         novo = self.amend("Corrigido")
+        enviar(self.repo, self.cliente, [{"op": "commit", "sha": novo}])
         enviar(self.repo, self.cliente, [{"op": "reescrita", "de": velho, "para": novo}])
         enviar(self.repo, self.cliente, [{"op": "commit", "sha": velho}])
         self.assertEqual([r["id"] for r in self.cliente.dados], [novo])
@@ -227,9 +228,28 @@ class TestEnviar(BaseEnvio):
         a = self.commit("A")
         b = self.amend("B")
         c = self.amend("C")
+        enviar(self.repo, self.cliente, [{"op": "commit", "sha": c}])
         enviar(self.repo, self.cliente, [{"op": "reescrita", "de": b, "para": c}])
         enviar(self.repo, self.cliente, [{"op": "reescrita", "de": a, "para": b}])
         self.assertEqual([r["id"] for r in self.cliente.dados], [c])
+
+    def test_reescrita_nao_republica_item_removido_do_feed(self):
+        velho = self.commit("Removido à mão")
+        novo = self.amend("Removido à mão, reescrito")
+        enviar(self.repo, self.cliente, [{"op": "reescrita", "de": velho, "para": novo}])
+        self.assertEqual(self.cliente.dados, [])
+
+    def test_reescrita_de_commit_ainda_na_fila_publica_o_novo(self):
+        velho = self.commit("Feito sem rede")
+        self.cliente.falhar = True
+        with self.assertRaises(OSError):
+            enviar(self.repo, self.cliente, [{"op": "commit", "sha": velho}])
+        novo = self.amend("Feito sem rede, corrigido")
+        with self.assertRaises(OSError):
+            enviar(self.repo, self.cliente, [{"op": "reescrita", "de": velho, "para": novo}])
+        self.cliente.falhar = False
+        enviar(self.repo, self.cliente)
+        self.assertEqual([r["id"] for r in self.cliente.dados], [novo])
 
     def test_falha_mantem_na_fila_e_reenvia(self):
         sha = self.commit("Offline")
