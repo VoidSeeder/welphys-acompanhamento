@@ -24,6 +24,15 @@ test('descarta item sem texto ou que não é objeto', () => {
   assert.deepEqual(r.map((i) => i.id), ['c']);
 });
 
+test('descarta data que não é texto', () => {
+  const r = lerRegistros([
+    { id: 'nula', tipo: 'nota', data: null, texto: 'x' },
+    { id: 'numero', tipo: 'nota', data: 0, texto: 'y' },
+    { id: 'ok', tipo: 'nota', data: '2026-11-01T10:00:00-03:00', texto: 'z' },
+  ]);
+  assert.deepEqual(r.map((i) => i.id), ['ok']);
+});
+
 test('ordena pelo instante, mesmo com fusos diferentes', () => {
   const r = lerRegistros([
     { id: 'antes', tipo: 'nota', data: '2026-11-01T12:00:00+00:00', texto: 'x' },

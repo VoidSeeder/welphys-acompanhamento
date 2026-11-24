@@ -24,6 +24,7 @@ ARQUIVO_FILA = "acompanhamento-pendentes.json"
 ARQUIVO_TRAVA = "acompanhamento.lock"
 ARQUIVO_LOG = "acompanhamento.log"
 MARCADOR = re.compile(r"^Acompanhamento:\s*n[ãa]o\s*$", re.IGNORECASE | re.MULTILINE)
+PREFIXO_AMEND = "commit (amend)"
 
 
 class BloqueiosAusentes(Exception):
@@ -130,23 +131,57 @@ def _commit_publicavel(repo, sha, termos):
     return registro
 
 
+def _passa_filtros(repo, sha, termos):
+    registro = ler_commit(repo, sha)
+    return registro is not None and not termo_bloqueado(registro["texto"], termos)
+
+
+def _reflog(repo):
+    r = _git(repo, "log", "-g", "-n", "500", "--format=%H%x00%gs", "HEAD", "--")
+    if r.returncode != 0:
+        return []
+    return [tuple(linha.split("\0", 1)) for linha in r.stdout.split("\n") if "\0" in linha]
+
+
+def _foi_amend(repo, sha):
+    return any(h == sha and assunto.startswith(PREFIXO_AMEND) for h, assunto in _reflog(repo))
+
+
+def _destino_do_commit(repo, sha):
+    """Se o commit já foi emendado, devolve o SHA final da sequência de amends."""
+    r = _git(repo, "rev-parse", "--verify", "--end-of-options", f"{sha}^{{commit}}")
+    if r.returncode != 0:
+        return sha
+    atual = r.stdout.strip()
+    if _alcancavel(repo, atual):
+        return atual
+    entradas = list(reversed(_reflog(repo)))
+    for (anterior, _), (seguinte, assunto) in zip(entradas, entradas[1:]):
+        if anterior == atual and assunto.startswith(PREFIXO_AMEND):
+            atual = seguinte
+    return atual
+
+
 def aplicar(registros, operacoes, repo, termos):
     _valida(registros)
     por_id = {r["id"]: r for r in registros}
-    # Só uma reescrita de algo já publicado ou na fila publica o novo SHA. Assim, um item
-    # apagado à mão do feed não volta quando o histórico é reescrito.
+    # Uma reescrita só publica o novo SHA se o antigo estava no feed, na fila ou tinha sido
+    # filtrado. Assim, um item apagado à mão do feed não volta quando o histórico é reescrito,
+    # e corrigir um título bloqueado com --amend ainda publica o commit.
     conhecidos = set(por_id)
     for operacao in operacoes:
         tipo = operacao.get("op")
         if tipo == "commit":
-            conhecidos.add(operacao["sha"])
-            novo = _commit_publicavel(repo, operacao["sha"], termos)
+            destino = _destino_do_commit(repo, operacao["sha"])
+            conhecidos.update((operacao["sha"], destino))
+            novo = _commit_publicavel(repo, destino, termos)
         elif tipo == "reescrita":
-            por_id.pop(operacao["de"], None)
+            de, para = operacao["de"], operacao["para"]
+            por_id.pop(de, None)
             novo = None
-            if operacao["de"] in conhecidos:
-                conhecidos.add(operacao["para"])
-                novo = _commit_publicavel(repo, operacao["para"], termos)
+            if de in conhecidos or not _passa_filtros(repo, de, termos):
+                conhecidos.add(para)
+                novo = _commit_publicavel(repo, para, termos)
         elif tipo == "nota":
             novo = operacao["registro"]
             termo = termo_bloqueado(novo["texto"], termos)
@@ -306,7 +341,9 @@ def principal(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", required=True, type=Path)
     comandos = parser.add_subparsers(dest="comando", required=True)
-    comandos.add_parser("commit").add_argument("sha")
+    comando_commit = comandos.add_parser("commit")
+    comando_commit.add_argument("--hook", action="store_true")
+    comando_commit.add_argument("sha")
     comandos.add_parser("nota").add_argument("frase")
     comandos.add_parser("reescrita")
     comandos.add_parser("enviar")
@@ -316,7 +353,8 @@ def principal(argv=None):
         return _publica_nota(args.repo, args.frase)
     try:
         if args.comando == "commit":
-            if _em_rebase(args.repo):
+            # No --amend, quem decide é a etapa de reescrita, que conhece o SHA antigo.
+            if _em_rebase(args.repo) or (args.hook and _foi_amend(args.repo, args.sha)):
                 return 0
             novas = [{"op": "commit", "sha": args.sha}]
         elif args.comando == "reescrita":

@@ -219,10 +219,18 @@ class TestEnviar(BaseEnvio):
     def test_commit_atrasado_depois_do_amend_nao_volta(self):
         velho = self.commit("Antigo")
         novo = self.amend("Corrigido")
-        enviar(self.repo, self.cliente, [{"op": "commit", "sha": novo}])
         enviar(self.repo, self.cliente, [{"op": "reescrita", "de": velho, "para": novo}])
         enviar(self.repo, self.cliente, [{"op": "commit", "sha": velho}])
         self.assertEqual([r["id"] for r in self.cliente.dados], [novo])
+
+    def test_commit_atrasado_segue_varios_amends(self):
+        a = self.commit("A")
+        b = self.amend("B")
+        c = self.amend("C")
+        enviar(self.repo, self.cliente, [{"op": "reescrita", "de": a, "para": b}])
+        enviar(self.repo, self.cliente, [{"op": "reescrita", "de": b, "para": c}])
+        enviar(self.repo, self.cliente, [{"op": "commit", "sha": a}])
+        self.assertEqual([r["id"] for r in self.cliente.dados], [c])
 
     def test_reescritas_fora_de_ordem_nao_duplicam(self):
         a = self.commit("A")
@@ -375,6 +383,51 @@ class TestLinhaDeComando(BaseEnvio):
         enviar(self.repo, self.cliente, [{"op": "commit", "sha": velho}])
         novo = self.amend("Novo")
         self.assertEqual(self.roda("reescrita", entrada=f"{velho} {novo}\n"), 0)
+        self.assertEqual([r["id"] for r in self.cliente.dados], [novo])
+
+    def test_hook_de_commit_normal_publica(self):
+        sha = self.commit("Normal")
+        self.assertEqual(self.roda("commit", "--hook", sha), 0)
+        self.assertEqual([r["id"] for r in self.cliente.dados], [sha])
+
+    def test_hook_de_amend_mantem_item_publicado(self):
+        velho = self.commit("Antigo")
+        self.roda("commit", "--hook", velho)
+        novo = self.amend("Novo")
+        self.roda("commit", "--hook", novo)
+        self.roda("reescrita", entrada=f"{velho} {novo}\n")
+        self.assertEqual([r["id"] for r in self.cliente.dados], [novo])
+
+    def test_hook_de_amend_nao_republica_item_removido(self):
+        velho = self.commit("Removido")
+        self.roda("commit", "--hook", velho)
+        self.cliente.dados = []
+        novo = self.amend("Removido, reescrito")
+        self.roda("commit", "--hook", novo)
+        self.roda("reescrita", entrada=f"{velho} {novo}\n")
+        self.assertEqual(self.cliente.dados, [])
+
+    def test_amend_que_tira_termo_bloqueado_publica(self):
+        self.escreve_bloqueios("segredo\n")
+        velho = self.commit("Com segredo")
+        self.roda("commit", "--hook", velho)
+        novo = self.amend("Limpo")
+        self.roda("commit", "--hook", novo)
+        self.roda("reescrita", entrada=f"{velho} {novo}\n")
+        self.assertEqual([r["texto"] for r in self.cliente.dados], ["Limpo"])
+
+    def test_amend_que_tira_marcador_publica(self):
+        velho = self.commit("Título\n\nAcompanhamento: não")
+        self.roda("commit", "--hook", velho)
+        novo = self.amend("Título")
+        self.roda("commit", "--hook", novo)
+        self.roda("reescrita", entrada=f"{velho} {novo}\n")
+        self.assertEqual([r["id"] for r in self.cliente.dados], [novo])
+
+    def test_commit_manual_de_amend_publica(self):
+        self.commit("Antigo")
+        novo = self.amend("Novo")
+        self.assertEqual(self.roda("commit", novo), 0)
         self.assertEqual([r["id"] for r in self.cliente.dados], [novo])
 
     def test_nota_publicada_so_com_os_quatro_campos(self):

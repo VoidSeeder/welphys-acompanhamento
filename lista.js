@@ -11,7 +11,9 @@
   function lerRegistros(json) {
     if (!Array.isArray(json)) throw new Error('O feed não é uma lista.');
     return json
-      .filter(function (r) { return r && typeof r === 'object' && typeof r.texto === 'string' && r.texto; })
+      .filter(function (r) {
+        return r && typeof r === 'object' && typeof r.data === 'string' && typeof r.texto === 'string' && r.texto;
+      })
       .map(function (r) {
         return {
           id: String(r.id !== undefined && r.id !== null ? r.id : r.data + ' ' + r.texto),
